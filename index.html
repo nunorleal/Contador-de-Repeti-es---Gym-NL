@@ -14,6 +14,18 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
     <style>
+        [hidden] { display: none !important; }
+        .mode-tabs { display: flex; border-bottom: 1px solid #334155; }
+        .mode-tabs button { flex: 1; padding: 12px 4px; color: #94a3b8; border-bottom: 2px solid transparent; }
+        .mode-tabs button[aria-selected="true"] { color: #34d399; border-color: #34d399; }
+        .manual-clock { font-size: 36px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: center; padding: 20px 0; }
+        .manual-tap { width: 100%; min-height: 260px; height: 40vh; max-height: 440px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: #064e3b; border: 1px solid #34d399; border-radius: 8px; touch-action: manipulation; }
+        .manual-tap:active { background: #065f46; }
+        .manual-tap:disabled { opacity: .5; }
+        .manual-tap strong { font-size: 72px; line-height: 1; font-variant-numeric: tabular-nums; max-width: 100%; overflow-wrap: anywhere; }
+        .manual-actions { display: flex; gap: 12px; margin-top: 16px; }
+        .manual-actions button { min-width: 48px; min-height: 48px; border: 1px solid #475569; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 12px; }
+        .manual-actions button:disabled { opacity: .4; }
         * {
             font-family: 'Plus Jakarta Sans', sans-serif;
             user-select: none;
@@ -87,6 +99,24 @@
 
     <!-- Conteúdo Principal -->
     <main class="w-full max-w-md my-auto py-3 flex flex-col gap-3.5">
+        <div class="mode-tabs" role="tablist" aria-label="Modo de treino">
+            <button id="automaticTab" role="tab" aria-selected="true" aria-controls="automaticPanel">Automático</button>
+            <button id="manualTab" role="tab" aria-selected="false" aria-controls="manualPanel" tabindex="-1">Séries por toque</button>
+        </div>
+        <section id="manualPanel" role="tabpanel" aria-labelledby="manualTab" hidden>
+            <div id="manualClock" class="manual-clock" role="timer" aria-label="Tempo de treino">00:00:00</div>
+            <button id="manualTap" class="manual-tap" aria-label="Adicionar uma série">
+                <strong id="manualCount" aria-live="polite">0</strong>
+                <span>Séries</span>
+                <i data-lucide="plus" class="w-7 h-7" aria-hidden="true"></i>
+            </button>
+            <div class="manual-actions">
+                <button id="manualStart" class="flex-1" title="Iniciar cronómetro"><i data-lucide="play" class="w-5 h-5" aria-hidden="true"></i><span id="manualStartLabel" class="ml-2">Iniciar</span></button>
+                <button id="manualUndo" title="Desfazer última série" aria-label="Desfazer última série" disabled><i data-lucide="undo-2" class="w-5 h-5"></i></button>
+                <button id="manualReset" title="Repor séries e cronómetro" aria-label="Repor séries e cronómetro"><i data-lucide="rotate-ccw" class="w-5 h-5"></i></button>
+            </div>
+        </section>
+        <div id="automaticPanel" role="tabpanel" aria-labelledby="automaticTab" class="flex flex-col gap-3.5">
 
         <!-- ECRÃ PRINCIPAL DE METRÓNOMO & MONITORIZAÇÃO -->
         <div id="displayCard" class="bg-gradient-to-b from-slate-900 to-slate-900/90 border border-slate-800/80 rounded-3xl p-5 shadow-2xl flex flex-col items-center text-center relative overflow-hidden">
@@ -271,6 +301,7 @@
             </button>
         </div>
 
+        </div>
     </main>
 
     <!-- MODAL DE HISTÓRICO DE TREINOS -->
@@ -437,6 +468,7 @@
 
         // Guia por Voz com Web Speech API
         let guideVoice = null;
+        let speechTimer = null;
 
         function loadGuideVoice() {
             if (!('speechSynthesis' in window)) return null;
@@ -461,6 +493,7 @@
         }
 
         function speak(text) {
+            clearTimeout(speechTimer);
             if (!state.isVoiceEnabled || !('speechSynthesis' in window)) return;
             try {
                 if (!guideVoice) loadGuideVoice();
@@ -472,8 +505,9 @@
                 utterance.rate = 1.05;
                 utterance.pitch = 1.0;
 
-                setTimeout(() => {
-                    window.speechSynthesis.speak(utterance);
+                speechTimer = setTimeout(() => {
+                    speechTimer = null;
+                    if (state.isVoiceEnabled) window.speechSynthesis.speak(utterance);
                 }, 20);
             } catch (e) {
                 console.log("Síntese de voz indisponível", e);
@@ -665,7 +699,6 @@
                 } else {
                     clearInterval(state.timer);
                     playSound(1000, 'triangle', 0.3);
-                    speak("Avançar!");
                     runWorkPhase();
                 }
             }, 1000);
@@ -798,7 +831,6 @@
                 } else {
                     clearInterval(state.timer);
                     playSound(1000, 'sine', 0.3);
-                    speak("Avançar!");
                     runWorkPhase();
                 }
             }, 1000);
@@ -823,7 +855,6 @@
 
         function resumeWorkout() {
             toggleUIState(true);
-            speak("A retomar");
             if (state.previousStatus === 'COUNT_IN') {
                 runCountInPhase();
             } else if (state.previousStatus === 'REST') {
@@ -1045,6 +1076,90 @@
         resetBtn.addEventListener('click', resetWorkout);
 
         // Inicialização Inicial
+        const manual = { count: 0, elapsed: 0, startedAt: null, timer: null };
+        const manualClock = document.getElementById('manualClock');
+        const manualTap = document.getElementById('manualTap');
+        const manualCount = document.getElementById('manualCount');
+        const manualStart = document.getElementById('manualStart');
+        const manualUndo = document.getElementById('manualUndo');
+
+        function renderManual() {
+            const elapsed = manual.elapsed + (manual.startedAt === null ? 0 : performance.now() - manual.startedAt);
+            const seconds = Math.floor(elapsed / 1000);
+            manualClock.textContent = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+                .map(value => String(value).padStart(2, '0')).join(':');
+            manualCount.textContent = manual.count;
+            document.getElementById('manualStartLabel').textContent = manual.startedAt !== null ? 'Pausar' : manual.elapsed > 0 ? 'Retomar' : 'Iniciar';
+            manualStart.title = manual.startedAt !== null ? 'Pausar cronómetro' : 'Iniciar cronómetro';
+            manualStart.querySelector('svg').setAttribute('data-lucide', manual.startedAt !== null ? 'pause' : 'play');
+            manualTap.disabled = manual.startedAt === null && manual.elapsed > 0;
+            manualUndo.disabled = manual.count === 0;
+        }
+
+        function pauseManual() {
+            if (manual.startedAt !== null) {
+                manual.elapsed += performance.now() - manual.startedAt;
+                manual.startedAt = null;
+            }
+            clearInterval(manual.timer);
+            manual.timer = null;
+            renderManual();
+            releaseWakeLock();
+            lucide.createIcons();
+        }
+
+        function startManual() {
+            if (manual.startedAt !== null) return;
+            initAudioContext();
+            initSpeech();
+            manual.startedAt = performance.now();
+            manual.timer = setInterval(renderManual, 100);
+            requestWakeLock();
+            renderManual();
+            lucide.createIcons();
+        }
+
+        manualTap.addEventListener('click', () => {
+            if (manual.startedAt === null) startManual();
+            manual.count++;
+            renderManual();
+            playSound(800, 'sine', 0.08);
+            speak(String(manual.count));
+        });
+        manualStart.addEventListener('click', () => manual.startedAt === null ? startManual() : pauseManual());
+        manualUndo.addEventListener('click', () => {
+            manual.count = Math.max(0, manual.count - 1);
+            renderManual();
+        });
+        document.getElementById('manualReset').addEventListener('click', () => {
+            pauseManual();
+            manual.count = 0;
+            manual.elapsed = 0;
+            clearTimeout(speechTimer);
+            if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+            renderManual();
+        });
+        function selectMode(isManual) {
+            if (isManual && state.status !== 'IDLE' && state.status !== 'PAUSED' && state.status !== 'FINISHED') pauseWorkout();
+            if (!isManual) pauseManual();
+            document.getElementById('automaticPanel').hidden = isManual;
+            document.getElementById('manualPanel').hidden = !isManual;
+            ['automaticTab', 'manualTab'].forEach((id, index) => {
+                const tab = document.getElementById(id);
+                const selected = isManual === (index === 1);
+                tab.setAttribute('aria-selected', String(selected));
+                tab.tabIndex = selected ? 0 : -1;
+            });
+        }
+        document.getElementById('automaticTab').addEventListener('click', () => selectMode(false));
+        document.getElementById('manualTab').addEventListener('click', () => selectMode(true));
+        document.querySelector('.mode-tabs').addEventListener('keydown', event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const isManual = event.key === 'End' || (event.key !== 'Home' && document.getElementById('manualPanel').hidden);
+            selectMode(isManual);
+            document.getElementById(isManual ? 'manualTab' : 'automaticTab').focus();
+        });
         initSpeech();
         syncTempoFromBpm();
     </script>
